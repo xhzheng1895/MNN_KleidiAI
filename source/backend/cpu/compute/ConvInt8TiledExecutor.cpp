@@ -909,7 +909,9 @@ ErrorCode DenseConvInt8TiledExecutor::onExecute(const std::vector<Tensor*>& inpu
     } else {
         MNN_CONCURRENCY_BEGIN(tId, mThreadNums) {
             int ocIndex = PackUnit * mDivides[tId];
-            ThreadFunction((int)tId, 0, mTileCount,1, ocIndex);
+            if (ocIndex < ocUp4) {
+                ThreadFunction((int)tId, 0, mTileCount,1, ocIndex);
+            }
         }
         MNN_CONCURRENCY_END();
     }
