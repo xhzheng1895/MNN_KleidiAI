@@ -449,6 +449,8 @@ ErrorCode DenseConvInt8TiledExecutor::onResize(const std::vector<Tensor*>& input
     int tileLimit = 0;
     int outC    = output->channel();
     int outC4 = UP_DIV(outC, gcore->pack);
+    int totalWork = outC4;
+    int part = 1;
 
     if (threads < planeSize) { // Thread split by output nhw.
         tileLimit = ALIMIN(tileLimitByC, UP_DIV(planeSize, threads));
@@ -462,6 +464,8 @@ ErrorCode DenseConvInt8TiledExecutor::onResize(const std::vector<Tensor*>& input
             int ocDivUnit = UP_DIV(outC4 * gcore->pack, UNIT);
             ocPerThread = UP_DIV(ocDivUnit, threads);
             threadNeed  = UP_DIV(ocDivUnit, ocPerThread);
+            totalWork = ocDivUnit;
+            part = UNIT / gcore->pack;
         }
         mThreadNums = ALIMIN(threads, threadNeed);
         mSplitByOc = true;
@@ -469,6 +473,9 @@ ErrorCode DenseConvInt8TiledExecutor::onResize(const std::vector<Tensor*>& input
         mDivides.resize(threads+1);
         mDivides[0] = 0;
         static_cast<const CPURuntime*>(backend()->getRuntime())->computeDivideSizes(outC4, mDivides.data() + 1);
+        for (int i = 0; i < mDivides.size(); i++) {
+            mDivides[i] *= part;
+        }
     }
     mIm2ColCount = UP_DIV(tileLimit, DST_XUNIT);
     auto DynamicDestUnit = DST_XUNIT * mIm2ColCount;
