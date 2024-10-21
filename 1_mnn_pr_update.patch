@@ -1,0 +1,633 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 006ae131..0eddb5dd 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -244,6 +244,7 @@ message(STATUS "\tOpenCL: ${MNN_OPENCL}")
+ message(STATUS "\tOpenGL: ${MNN_OPENGL}")
+ message(STATUS "\tVulkan: ${MNN_VULKAN}")
+ message(STATUS "\tARM82: ${MNN_ARM82}")
++message(STATUS "\tKleidiAI: ${MNN_KLEIDIAI}")
+ message(STATUS "\toneDNN: ${MNN_ONEDNN}")
+ message(STATUS "\tTensorRT: ${MNN_TENSORRT}")
+ message(STATUS "\tCoreML: ${MNN_COREML}")
+diff --git a/source/backend/cpu/CPUBackend.hpp b/source/backend/cpu/CPUBackend.hpp
+index 63b42caf..eaea9a90 100644
+--- a/source/backend/cpu/CPUBackend.hpp
++++ b/source/backend/cpu/CPUBackend.hpp
+@@ -18,7 +18,7 @@
+ #include "MNN_generated.h"
+ 
+ #ifdef MNN_KLEIDIAI_ENABLED
+-#include "arm/kleidiAI/MNNKleidiAI.h"
++#include "arm/kleidiAI/mnn_kleidiai.h"
+ #endif
+ 
+ namespace MNN {
+diff --git a/source/backend/cpu/arm/kleidiAI/CMakeLists.txt b/source/backend/cpu/arm/kleidiAI/CMakeLists.txt
+index 556da784..34cd7a3b 100644
+--- a/source/backend/cpu/arm/kleidiAI/CMakeLists.txt
++++ b/source/backend/cpu/arm/kleidiAI/CMakeLists.txt
+@@ -1,18 +1,26 @@
+-list(APPEND MNN_KleidiAI_SOURCES ${CMAKE_CURRENT_LIST_DIR}/MNNKleidiAI.cpp)
+-list(APPEND MNN_KleidiAI_HEADERS ${CMAKE_CURRENT_LIST_DIR}/MNNKleidiAI.h)
++#
++# SPDX-FileCopyrightText: Copyright 2024 Arm Limited and/or its affiliates <open-source-office@arm.com>
++#
++# SPDX-License-Identifier: Apache-2.0
++#
+ 
+-include_directories(
+-    ${CMAKE_CURRENT_LIST_DIR}/
+-    ${CMAKE_CURRENT_LIST_DIR}/kai/ukernels/
+-    ${CMAKE_CURRENT_LIST_DIR}/kai/ukernels/matmul/
+-    ${CMAKE_CURRENT_LIST_DIR}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/
+-    ${CMAKE_CURRENT_LIST_DIR}/kai/ukernels/matmul/pack/)
++project(MNN_KleidiAI
++    LANGUAGES C CXX ASM
++)
++
++set(KLEIDIAI_MIN_CLANG_VERSION 11)
++set(KLEIDIAI_MIN_GNU_VERSION 11)
+ 
+-list(APPEND MNN_KleidiAI_SOURCES ${CMAKE_CURRENT_LIST_DIR}/kai/ukernels/matmul/pack/kai_lhs_quant_pack_qai8dxp_f32.c)
+-list(APPEND MNN_KleidiAI_SOURCES ${CMAKE_CURRENT_LIST_DIR}/kai/ukernels/matmul/pack/kai_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0.c)
+-list(APPEND MNN_KleidiAI_SOURCES ${CMAKE_CURRENT_LIST_DIR}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/kai_matmul_clamp_f32_qai8dxp1x8_qsi4cxp4x8_1x4x32_neon_dotprod.c)
+-list(APPEND MNN_KleidiAI_SOURCES ${CMAKE_CURRENT_LIST_DIR}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/kai_matmul_clamp_f32_qai8dxp4x8_qsi4cxp4x8_8x4x32_neon_i8mm.c)
++if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_LESS ${KLEIDIAI_MIN_CLANG_VERSION})
++    message(WARNING "KleidiAI: Using non-supported Clang version. Expected ${KLEIDIAI_MIN_CLANG_VERSION} or newer, received ${CMAKE_C_COMPILER_VERSION}.")
++endif()
+ 
++if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS ${KLEIDIAI_MIN_GNU_VERSION})
++    message(WARNING "KleidiAI: Using non-supported GCC version. Expected ${KLEIDIAI_MIN_GNU_VERSION} or newer, received ${CMAKE_C_COMPILER_VERSION}.")
++endif()
++
++list(APPEND MNN_KleidiAI_SOURCES ${CMAKE_CURRENT_LIST_DIR}/mnn_kleidiai.cpp)
++list(APPEND MNN_KleidiAI_HEADERS ${CMAKE_CURRENT_LIST_DIR}/mnn_kleidiai.h)
+ 
+ add_library(
+     MNN_KleidiAI
+@@ -20,15 +28,36 @@ add_library(
+     ${MNN_KleidiAI_SOURCES} ${MNN_KleidiAI_HEADERS}
+ )
+ 
+-# Enable ARMv8.6-A features
+-target_compile_definitions(MNN_KleidiAI PRIVATE
+-    __ARM_FEATURE_MATMUL_INT8
+-    __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
+-    __ARM_FEATURE_BF16_SCALAR_ARITHMETIC
+-    __ARM_BF16_FORMAT_ALTERNATIVE
+-    __ARM_FEATURE_DOTPROD
++set(KLEIDIAI_SRC ${CMAKE_CURRENT_LIST_DIR})
++
++include_directories(
++    ${KLEIDIAI_SRC}/
++    ${KLEIDIAI_SRC}/kai/
++    ${KLEIDIAI_SRC}/kai/ukernels/
++    ${KLEIDIAI_SRC}/kai/ukernels/matmul/
++    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/
++    ${KLEIDIAI_SRC}/kai/ukernels/matmul/pack/)
++
++set(KLEIDIAI_FILES_SCALAR
++    ${KLEIDIAI_SRC}/kai/ukernels/matmul/pack/kai_lhs_quant_pack_qai8dxp_f32.c
++    ${KLEIDIAI_SRC}/kai/ukernels/matmul/pack/kai_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0.c
++)
++
++set(KLEIDIAI_FILES_NEON_DOTPROD
++    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/kai_matmul_clamp_f32_qai8dxp1x8_qsi4cxp4x8_1x4x32_neon_dotprod.c
+ )
+ 
+-target_compile_options(MNN_KleidiAI
+-    PRIVATE -march=armv8.6-a
+-)
+\ No newline at end of file
++set(KLEIDIAI_FILES_NEON_I8MM
++    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/kai_matmul_clamp_f32_qai8dxp4x8_qsi4cxp4x8_8x4x32_neon_i8mm.c
++)
++
++# Selectively enable architecture features.
++target_sources(MNN_KleidiAI PRIVATE ${KLEIDIAI_FILES_SCALAR})
++if((CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64") AND NOT MSVC)
++    target_sources(MNN_KleidiAI PRIVATE ${KLEIDIAI_FILES_NEON_DOTPROD})
++    target_sources(MNN_KleidiAI PRIVATE ${KLEIDIAI_FILES_NEON_I8MM})
++
++    set_source_files_properties(${KLEIDIAI_FILES_SCALAR}       PROPERTIES COMPILE_OPTIONS -march=armv8-a)
++    set_source_files_properties(${KLEIDIAI_FILES_NEON_DOTPROD} PROPERTIES COMPILE_OPTIONS -march=armv8.2-a+dotprod)
++    set_source_files_properties(${KLEIDIAI_FILES_NEON_I8MM}    PROPERTIES COMPILE_OPTIONS -march=armv8.2-a+i8mm)
++endif()
+\ No newline at end of file
+diff --git a/source/backend/cpu/arm/kleidiAI/MNNKleidiAI.cpp b/source/backend/cpu/arm/kleidiAI/MNNKleidiAI.cpp
+deleted file mode 100644
+index 465a6e4a..00000000
+--- a/source/backend/cpu/arm/kleidiAI/MNNKleidiAI.cpp
++++ /dev/null
+@@ -1,215 +0,0 @@
+-#if defined(__aarch64__)
+-
+-#include "MNNKleidiAI.h"
+-
+-using namespace MNN;
+-
+-KleidiAI *KleidiAI::instance = NULL;
+-
+-inline static size_t kai_k_roundedup(size_t k, size_t kr, size_t sr) {
+-    // Since we pack a float and int32 value at the end of the row,
+-    // we must make sure that k is a multiple of 4 for memory alignment.
+-    size_t kr_sr_roundedup4 = kai_roundup(kr * sr, 4);
+-    return kai_roundup(k, kr_sr_roundedup4);
+-}
+-
+-static void packQsi4cxpQsi8cxs1s0(size_t num_groups, size_t n, size_t k, size_t nr, size_t kr, size_t sr, const uint8_t* rhs, const float* bias,
+-                                  const float* scale, void* rhs_packed, size_t extra_bytes,
+-                                  const struct kai_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0_params* params) {
+-    KAI_ASSERT(num_groups == 1);
+-    KAI_ASSERT(extra_bytes == 0);
+-    KAI_ASSERT((kr % sr) == 0);
+-    KAI_ASSERT(rhs != NULL);
+-    KAI_ASSERT(scale != NULL);
+-    KAI_ASSERT(rhs_packed != NULL);
+-    KAI_ASSERT(params != NULL);
+-    KAI_ASSERT(params->rhs_zero_point == 8);
+-    KAI_ASSERT(params->lhs_zero_point == 1);
+-
+-    const size_t rhs_zero_point = params->rhs_zero_point;
+-    const size_t rhs_packed_stride = kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(k, nr, kr, sr);
+-    const size_t k_internal = kai_k_roundedup(k, kr, sr);
+-    const size_t dst_num_rows = kai_roundup(n, nr) / nr;
+-    const size_t dst_num_bytes_per_row = nr * (kai_k_roundedup(k, kr, sr) / 2);
+-    const size_t block_length_in_bytes = kr / sr;
+-    const size_t k_interleaved_v = 16U;
+-    const size_t rhs_stride = kai_roundup(k, 2);
+-
+-    for (size_t dst_row_idx = 0; dst_row_idx < dst_num_rows; ++dst_row_idx) {
+-        uint8_t* dst_row = (uint8_t*)rhs_packed + dst_row_idx * rhs_packed_stride;
+-
+-        int32_t* sums = (int32_t*)(dst_row + nr * (k_internal / 2));
+-
+-        // Initialize to zero the RHS reduction sums
+-        memset(sums, 0, nr * sizeof(int32_t));
+-
+-        for (size_t dst_byte_idx = 0; dst_byte_idx < dst_num_bytes_per_row; ++dst_byte_idx) {
+-            const size_t block_idx = dst_byte_idx / block_length_in_bytes;
+-            const size_t block_byte_idx = dst_byte_idx % block_length_in_bytes;
+-            const size_t super_block_idx = block_idx / nr;
+-            const size_t nr_idx = block_idx % nr;
+-
+-            const size_t k_adjustment =
+-                ((block_byte_idx + super_block_idx * block_length_in_bytes) / k_interleaved_v) * k_interleaved_v;
+-            const size_t k0_idx = block_byte_idx + super_block_idx * block_length_in_bytes + k_adjustment;
+-            const size_t k1_idx = k0_idx + k_interleaved_v;
+-            const size_t n0_idx = dst_row_idx * nr + nr_idx;
+-
+-            // Clamp the index to avoid out-of-bound reads
+-            const size_t n0_valid_idx = KAI_MIN(n0_idx, n - 1);
+-
+-            const size_t src_addr_byte0 = k0_idx + n0_valid_idx * rhs_stride;
+-            const size_t src_addr_byte1 = k1_idx + n0_valid_idx * rhs_stride;
+-
+-            int8_t byte0 = 0;
+-            int8_t byte1 = 0;
+-
+-            if (k0_idx < k) {
+-                byte0 = rhs[src_addr_byte0];
+-            }
+-
+-            if (k1_idx < k) {
+-                byte1 = rhs[src_addr_byte1];
+-            }
+-
+-            sums[nr_idx] += (int32_t)byte0 + (int32_t)byte1;
+-
+-            const uint8_t dst_qs0 = (byte0 + rhs_zero_point) | ((byte1 + rhs_zero_point) << 4);
+-
+-            *dst_row = dst_qs0 ^ 0x88;
+-            dst_row += sizeof(uint8_t);
+-        }
+-
+-        // Adjust the reduction sums
+-        for (size_t i = 0; i < nr; ++i) {
+-            sums[i] = sums[i] * 16;
+-            dst_row += sizeof(int32_t);
+-        }
+-
+-        // Adjust the scales
+-        for (size_t i = 0; i < nr; ++i) {
+-            // Clamp the row index to avoid out-of-bound reads
+-            const size_t src_row_idx = KAI_MIN(dst_row_idx * nr + i, n - 1);
+-            *((float*)(dst_row)) = scale[src_row_idx] * 0.0625F;
+-            dst_row += sizeof(float);
+-        }
+-
+-        // Set the bias
+-        if (bias == NULL) {
+-            memset(dst_row, 0, nr * sizeof(float));
+-        } else {
+-            for (size_t i = 0; i < nr; ++i) {
+-                // Clamp the row index to avoid out-of-bound reads
+-                const size_t src_row_idx = KAI_MIN(dst_row_idx * nr + i, n - 1);
+-                ((float*)dst_row)[i] = bias[src_row_idx];
+-            }
+-        }
+-    }
+-}
+-
+-void KleidiAI::packNCHWToNC4HW4(float* data, size_t rowNum, size_t rowSize) {
+-    if(rowNum == 1) {
+-        return;
+-    }
+-
+-    const size_t tmp_size = rowNum * rowSize * sizeof(float);
+-    uint8_t *tmpBuffer = new uint8_t[tmp_size];
+-    memcpy(tmpBuffer, data, tmp_size);
+-
+-    const float *src = (const float *)tmpBuffer;
+-    float *dst = (float *)data;
+-
+-    size_t blockNum = rowSize / 4;
+-    size_t blockSize = 4 * sizeof(float);
+-
+-    for(size_t blockIndex = 0; blockIndex < blockNum; blockIndex++) {
+-        const float *rowSrc = src + blockIndex * 4;
+-        for(size_t rowIndex = 0; rowIndex < rowNum; rowIndex++) {
+-            memcpy(dst, rowSrc, blockSize);
+-            dst += 4;
+-            rowSrc += rowSize;
+-        }
+-    }
+-}
+-
+-void KleidiAI::packNC4HW4ToNCHW(float* data, size_t rowNum, size_t rowSize) {
+-    if(rowNum == 1) {
+-        return;
+-    }
+-
+-    const size_t tmp_size = rowNum * rowSize * sizeof(float);
+-    uint8_t *tmpBuffer = new uint8_t[tmp_size];
+-    memcpy(tmpBuffer, data, tmp_size);
+-
+-    const float *src = (const float *)tmpBuffer;
+-    float *dst = (float *)data;
+-
+-    size_t blockNum = rowSize / 4;
+-    size_t blockSize = 4 * sizeof(float);
+-
+-    for(size_t blockIndex = 0; blockIndex < blockNum; blockIndex++) {
+-        const float *rowSrc = src + blockIndex * 4 * rowNum;
+-        float *block_dst = dst + blockIndex * 4;
+-        for(size_t rowIndex = 0; rowIndex < rowNum; rowIndex++) {
+-            memcpy(block_dst, rowSrc, blockSize);
+-            block_dst += rowSize;
+-            rowSrc += 4;
+-        }
+-    }
+-}
+-
+-//Lhs
+-size_t KleidiAI::getLhsQuantedPackedSize(size_t m, size_t k) {
+-    return kai_get_lhs_packed_size_lhs_quant_pack_qai8dxp_f32(m, k, getMr(m), getKr(), getSr());
+-}
+-
+-size_t KleidiAI::getLhsQuantedPackedOffset(size_t m, size_t mIdx, size_t k) {
+-    return mIdx == 0 ? 0 : kai_get_lhs_packed_offset_lhs_quant_pack_qai8dxp_f32(mIdx, k, getMr(m), getKr(), getSr());
+-}
+-
+-void KleidiAI::runLhsQuantPack(size_t m, size_t k, const void* lhs, void* lhsQuantedPacked) {
+-    kai_run_lhs_quant_pack_qai8dxp_f32(m, k, getMr(m), getKr(), getSr(), 0, (const float *)lhs, k * sizeof(float), lhsQuantedPacked);
+-}
+-
+-//Rhs
+-size_t KleidiAI::getRhsPackedSize(size_t n, size_t k) {
+-    return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(n, k, getNr(), getKr(), getSr());
+-}
+-
+-size_t KleidiAI::getRhsPackedOffset(size_t nIdx, size_t k) {
+-    return kai_get_rhs_packed_offset_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(nIdx, k, getNr(), getKr(), getSr());
+-}
+-
+-void KleidiAI::runRhsPack(size_t n, size_t k, const void* rhs, const void* scale, const void *bias, void* rhsPacked, bool packedInt4) {
+-    struct kai_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0_params params;
+-    params.lhs_zero_point = 1;
+-    params.rhs_zero_point = 8;
+-    if(!packedInt4) {
+-        packQsi4cxpQsi8cxs1s0(1, n, k, getNr(), getKr(), getSr(),
+-                             (const uint8_t *)rhs,
+-                             (const float *)bias, (const float *)scale,
+-                             rhsPacked,
+-                             0, &params);
+-    } else {
+-        kai_run_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(1, n, k, getNr(), getKr(), getSr(),
+-                                                (const uint8_t *)rhs,
+-                                                (const float *)bias, (const float *)scale,
+-                                                rhsPacked,
+-                                                0, &params);
+-    }
+-}
+-
+-//Matmul
+-void KleidiAI::runMatmul(size_t m, size_t n, size_t k, const void* lhsPacked, const void* rhsPacked, size_t dst_stride, void* dst) {
+-    if(m == 1) { //dotprod
+-        kai_run_matmul_clamp_f32_qai8dxp1x8_qsi4cxp4x8_1x4x32_neon_dotprod(m, n, k, 
+-                                                  (const void *)lhsPacked, (const void *)rhsPacked, (float *)dst,
+-                                                  dst_stride, sizeof(float), -FLT_MAX, FLT_MAX);
+-    } else { //i8mm
+-        kai_run_matmul_clamp_f32_qai8dxp4x8_qsi4cxp4x8_8x4x32_neon_i8mm(m, n, k, 
+-                                                  (const void *)lhsPacked, (const void *)rhsPacked, (float *)dst,
+-                                                  dst_stride, sizeof(float), -FLT_MAX, FLT_MAX);
+-    }
+-}
+-
+-#endif // defined(__aarch64__)
+\ No newline at end of file
+diff --git a/source/backend/cpu/arm/kleidiAI/MNNKleidiAI.h b/source/backend/cpu/arm/kleidiAI/MNNKleidiAI.h
+deleted file mode 100644
+index 92ec40fd..00000000
+--- a/source/backend/cpu/arm/kleidiAI/MNNKleidiAI.h
++++ /dev/null
+@@ -1,108 +0,0 @@
+-#pragma once
+-
+-#include <MNN/ErrorCode.hpp>
+-#include <core/Backend.hpp>
+-#include <core/Execution.hpp>
+-#include <core/TensorUtils.hpp>
+-#include <backend/cpu/CPUBackend.hpp>
+-#include <backend/cpu/CPURuntime.hpp>
+-
+-#include <arm_neon.h>
+-#include <assert.h>
+-#include <cfloat>
+-#include <stdint.h>
+-#include <string.h>
+-#include <vector>
+-
+-#include "kai_lhs_quant_pack_qai8dxp_f32.h"
+-#include "kai_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0.h"
+-#include "kai_matmul_clamp_f32_qai8dxp1x8_qsi4cxp4x8_1x4x32_neon_dotprod.h"
+-#include "kai_matmul_clamp_f32_qai8dxp4x8_qsi4cxp4x8_8x4x32_neon_i8mm.h"
+-
+-#include "./kai/kai_common.h"
+-
+-namespace MNN {
+-    class KleidiAI {
+-    public:
+-        static KleidiAI &getInstance(bool bAsymmetric) {
+-            if(!instance) {
+-                instance = new KleidiAI(bAsymmetric);
+-            }
+-            return *instance;
+-        }
+-
+-        static KleidiAI &getInstance() {
+-            if(!instance) {
+-                instance = new KleidiAI;
+-            }
+-            return *instance;
+-        }
+-
+-        ~KleidiAI() {}
+-
+-        struct KAIInfo {
+-            bool kaiEnable = false;
+-            bool asymmetric = false; //Asymmetric quantized model.
+-            bool dot = false; //CPU support sdot.
+-            bool i8mm = false; //CPU support i8mm.
+-        };
+-
+-        //Kai util
+-        void packNCHWToNC4HW4(float* data, size_t rowNum, size_t rowSize);
+-        void packNC4HW4ToNCHW(float* data, size_t rowNum, size_t rowSize);
+-
+-        //Set info
+-        void setEnable(bool enable) { mKAIInfo.kaiEnable = enable; }
+-        void setModelAsymmetric(bool bAsymmetric) { mKAIInfo.asymmetric = bAsymmetric; }
+-
+-        //Check
+-        bool canAccelerate() { return (mKAIInfo.kaiEnable && mKAIInfo.dot && mKAIInfo.i8mm && !mKAIInfo.asymmetric); }
+-
+-        //Get info
+-        size_t getMr(size_t m = 1) { return (m == 1) ? mKaiMrDotprod : mKaiMrI8mm; }
+-        size_t getNr() { return mKaiNr; }
+-        size_t getKr() { return mKaiKr; }
+-        size_t getSr() { return mKaiSr; }
+-        size_t getMStep(size_t m = 1) { return (m == 1) ? mKaiMstepDotprod : mKaiMstepI8mm; }
+-        size_t getNStep() { return mKaiNStep; }
+-        size_t getVecNumPerThread(size_t totalVec, size_t totalThread, size_t minStep) { return kai_roundup(totalVec / totalThread, minStep); }
+-
+-        //Lhs
+-        size_t getLhsQuantedPackedSize(size_t m, size_t k);
+-        size_t getLhsQuantedPackedOffset(size_t m, size_t mIdx, size_t k);
+-        void runLhsQuantPack(size_t m, size_t k, const void* lhs, void* lhsQuantedPacked);
+-
+-        //Rhs
+-        size_t getRhsPackedSize(size_t n, size_t k);
+-        size_t getRhsPackedOffset(size_t nIdx, size_t k);
+-        void runRhsPack(size_t n, size_t k, const void* rhs, const void* scale, const void *bias, void* rhsPacked, bool packedInt4 = false);
+-
+-        //Dst
+-        size_t getDstOffset(size_t mIdx, size_t nIdx, size_t n) { return (nIdx * sizeof(float)) + mIdx * (n * sizeof(float)); }
+-
+-        //Matmul
+-        void runMatmul(size_t m, size_t n, size_t k, const void* lhsPacked, const void* rhsPacked, size_t dst_stride, void* dst);
+-
+-    private:
+-        KleidiAI(bool bAsymmetric = false) {
+-            const MNNCPUInfo& gCPUInfo = *MNNGetCPUInfo();
+-            mKAIInfo.dot = gCPUInfo.dot;
+-            mKAIInfo.i8mm = gCPUInfo.i8mm;
+-            mKAIInfo.kaiEnable = true;
+-            mKAIInfo.asymmetric = bAsymmetric;
+-        }
+-
+-        static KleidiAI *instance;
+-        KAIInfo mKAIInfo;
+-
+-        const size_t mKaiMstepDotprod = 1;
+-        const size_t mKaiMstepI8mm = 8;
+-        const size_t mKaiNStep = 4;
+-
+-        const size_t mKaiMrDotprod = 1;
+-        const size_t mKaiMrI8mm = 4;
+-        const size_t mKaiNr = 4;
+-        const size_t mKaiKr = 16;
+-        const size_t mKaiSr = 2;
+-    };
+-}
+\ No newline at end of file
+diff --git a/source/backend/cpu/compute/ConvInt8TiledExecutor.cpp b/source/backend/cpu/compute/ConvInt8TiledExecutor.cpp
+index 1c4676d2..339fa28b 100644
+--- a/source/backend/cpu/compute/ConvInt8TiledExecutor.cpp
++++ b/source/backend/cpu/compute/ConvInt8TiledExecutor.cpp
+@@ -213,7 +213,7 @@ DenseConvInt8TiledExecutor::DenseConvInt8TiledExecutor(Backend* backend, const C
+         quanCommon = ConvolutionCommon::load(convOp, backend, false, true);
+     }
+ 
+-#if MNN_KLEIDIAI_ENABLED
++#ifdef MNN_KLEIDIAI_ENABLED
+     KleidiAI kai = KleidiAI::getInstance(quanCommon->asymmetric);
+     if(mDynamicQuantExe) {
+         if(quanCommon->canUseInt4 && kai.canAccelerate()) {
+@@ -379,7 +379,7 @@ ErrorCode DenseConvInt8TiledExecutor::onResize(const std::vector<Tensor*>& input
+     int UNIT, SRC_UNIT, DST_XUNIT;
+     core->MNNGetGemmUnit(&UNIT, &SRC_UNIT, &DST_XUNIT);
+ 
+-#if MNN_KLEIDIAI_ENABLED
++#ifdef MNN_KLEIDIAI_ENABLED
+     KleidiAI& kai = KleidiAI::getInstance();
+     if(mDynamicQuantExe) {
+         if(mResource->mDequantize.bits == 4 && kai.canAccelerate()) {
+@@ -552,7 +552,7 @@ ErrorCode DenseConvInt8TiledExecutor::onExecute(const std::vector<Tensor*>& inpu
+     auto core = static_cast<CPUBackend*>(backend())->int8Functions();
+     auto gcore = static_cast<CPUBackend*>(backend())->functions();
+ 
+-#if MNN_KLEIDIAI_ENABLED
++#ifdef MNN_KLEIDIAI_ENABLED
+     KleidiAI& kai = KleidiAI::getInstance();
+     if(mDynamicQuantExe) {
+         if(mResource->mDequantize.bits == 4 && kai.canAccelerate()) {
+@@ -560,30 +560,48 @@ ErrorCode DenseConvInt8TiledExecutor::onExecute(const std::vector<Tensor*>& inpu
+             const size_t n = output->channel(); //rhs vector number.
+             const size_t k = input->channel(); //vector size.
+ 
+-            auto lhs = reinterpret_cast<const float*>(input->host<uint8_t>());
++            auto lhs = input->host<uint8_t>();
+             auto lhsPacked = mTempIm2ColBuffer->host<int8_t>();
+             auto rhsPacked = mResourceInt8->mWeightInt8->host<uint8_t>();
+-            auto dst = reinterpret_cast<float*>(output->host<uint8_t>());
++            auto dst = output->host<uint8_t>();
++
++            int threadNum = static_cast<CPUBackend*>(backend())->threadNumber();
++            int threadNeed, vecPerThread;
+ 
+ #if !KAI_CONV_NCHW_IN_OUT
+             kai.packNC4HW4ToNCHW((float *)lhs, m, k);
+ #endif
+-            auto BatchDynamicQuant = [=]() {
+-                KleidiAI& kai = KleidiAI::getInstance();
+-                kai.runLhsQuantPack(m, k, lhs, lhsPacked);
+-            };
+ 
+-            BatchDynamicQuant();
++            //Dynamic quant pack lhs.
++            if(m == 1) {
++                kai.runLhsQuantPack(1, k, 1, lhs, lhsPacked);
++            } else {
++                vecPerThread = kai.getVecNumPerThread(m, threadNum, kai.getMr(m));
++                threadNeed = m % vecPerThread == 0 ? m / vecPerThread : (m / vecPerThread + 1);
++                size_t srcStride = vecPerThread * k * sizeof(float);
++
++                auto BatchDynamicQuant = [=, &kai](int tId) {
++                    auto threadSrc = lhs + tId * srcStride;
++                    auto threadDst = lhsPacked + kai.getLhsQuantedPackedOffset(m, tId * vecPerThread, k);
++                    int vecNum = (tId == threadNeed - 1) ? (m - vecPerThread * tId) : vecPerThread; //Last threadN may less than vecPerThread.
++                    kai.runLhsQuantPack(vecNum, k, kai.getMr(m), threadSrc, threadDst);
++                };
++
++                MNN_CONCURRENCY_BEGIN(tId, threadNeed) {
++                    BatchDynamicQuant((int)tId);
++                }
++                MNN_CONCURRENCY_END();
++            }
+ 
+-            int nPerThread = kai.getVecNumPerThread(n, static_cast<CPUBackend*>(backend())->threadNumber(), kai.getNStep());
+-            int threadNeed = n % nPerThread == 0 ? n / nPerThread : (n / nPerThread + 1);
++            //Run matmul.
++            vecPerThread = kai.getVecNumPerThread(n, threadNum, kai.getNStep());
++            threadNeed = n % vecPerThread == 0 ? n / vecPerThread : (n / vecPerThread + 1);
+ 
+-            auto ThreadFunction = [=](int tId) {
+-                KleidiAI& kai = KleidiAI::getInstance();
+-                auto threadRhsPacked = rhsPacked + kai.getRhsPackedOffset(tId * nPerThread, k);
+-                auto threadDst = reinterpret_cast<uint8_t *>(dst) + kai.getDstOffset(0, tId * nPerThread, n);
+-                int threadN = (tId == threadNeed - 1) ? (n - nPerThread * tId) : nPerThread; //Last threadN may less than nPerThread.
+-                kai.runMatmul(m, threadN, k, lhsPacked, threadRhsPacked, n * sizeof(float), threadDst);
++            auto ThreadFunction = [=, &kai](int tId) {
++                auto threadRhsPacked = rhsPacked + kai.getRhsPackedOffset(tId * vecPerThread, k);
++                auto threadDst = dst + kai.getDstOffset(0, tId * vecPerThread, n);
++                int vecNum = (tId == threadNeed - 1) ? (n - vecPerThread * tId) : vecPerThread; //Last threadN may less than vecPerThread.
++                kai.runMatmul(m, vecNum, k, lhsPacked, threadRhsPacked, n * sizeof(float), threadDst);
+             };
+ 
+             MNN_CONCURRENCY_BEGIN(tId, threadNeed) {
+@@ -909,7 +927,7 @@ ErrorCode DenseConvInt8TiledExecutor::onExecute(const std::vector<Tensor*>& inpu
+     } else {
+         MNN_CONCURRENCY_BEGIN(tId, mThreadNums) {
+             int ocIndex = PackUnit * mDivides[tId];
+-            if (ocIndex < ocUp4) {
++            if (ocIndex < ocUp4){
+                 ThreadFunction((int)tId, 0, mTileCount,1, ocIndex);
+             }
+         }
+diff --git a/source/core/TensorUtils.hpp b/source/core/TensorUtils.hpp
+index eaeba488..3318f7d8 100644
+--- a/source/core/TensorUtils.hpp
++++ b/source/core/TensorUtils.hpp
+@@ -20,9 +20,13 @@
+ #endif // CONSTANT
+ 
+ #ifdef MNN_KLEIDIAI_ENABLED
++#include "../backend/cpu/arm/kleidiAI/mnn_kleidiai.h"
++/**
++ * Set DenseConvInt8TiledExecutor's input/output tensor format: 
++ * KAI_CONV_NCHW_IN_OUT = 1: format will be NCHW, skip pack/unpack functions.
++ * KAI_CONV_NCHW_IN_OUT = 0: format will be NC4HW4, need pack/unpack functions to fit kleidiAI ukernel.
++ **/
+ #define KAI_CONV_NCHW_IN_OUT 1
+-#else
+-#define KAI_CONV_NCHW_IN_OUT 0
+ #endif
+ 
+ namespace MNN {
+diff --git a/source/geometry/GeometryConvUtils.cpp b/source/geometry/GeometryConvUtils.cpp
+index 10f27f76..21670bd2 100644
+--- a/source/geometry/GeometryConvUtils.cpp
++++ b/source/geometry/GeometryConvUtils.cpp
+@@ -247,25 +247,23 @@ std::shared_ptr<Tensor> GeometryConvUtils::im2Col(Tensor* im2Col, Tensor* input,
+     return tempTensor;
+ }
+ bool GeometryConvUtils::computeSingle(const Op* op, const std::vector<Tensor*>& inputs, const std::vector<Tensor*>& outputs, GeometryComputer::Context& context, CommandBuffer& res) {
+-    auto newOutputs   = outputs;
+-    auto newInputs    = inputs;
+-    auto originOutput = outputs[0];
+-    auto output       = originOutput;
+-    auto inputDes     = TensorUtils::getDescribe(newInputs[0]);
+-    auto format       = inputDes->dimensionFormat;
+ #if KAI_CONV_NCHW_IN_OUT
+-    {
++    if(KleidiAI::getInstance().canAccelerate()) {
+         std::shared_ptr<Command> cmd(new Command);
+         cmd->op      = op;
+-        cmd->inputs  = std::move(newInputs);
+-        cmd->outputs = std::move(newOutputs);
++        cmd->inputs  = std::move(inputs);
++        cmd->outputs = std::move(outputs);
+         res.command.emplace_back(std::move(cmd));
+-        if (originOutput != output) {
+-            ConvertUtils::compute(output, originOutput, res);
+-        }
+         return true;
+     }
+ #endif
++    auto newOutputs   = outputs;
++    auto newInputs    = inputs;
++    auto originOutput = outputs[0];
++    auto output       = originOutput;
++    auto inputDes     = TensorUtils::getDescribe(newInputs[0]);
++    auto format       = inputDes->dimensionFormat;
++
+     if (MNN_DATA_FORMAT_NC4HW4 != format) {
+         std::shared_ptr<Tensor> newInput(new Tensor(newInputs[0], Tensor::CAFFE_C4, false));
+         ConvertUtils::compute(newInputs[0], newInput.get(), res);
+diff --git a/source/shape/ShapeTensorConvert.cpp b/source/shape/ShapeTensorConvert.cpp
+index c577d175..899b9410 100644
+--- a/source/shape/ShapeTensorConvert.cpp
++++ b/source/shape/ShapeTensorConvert.cpp
+@@ -24,7 +24,9 @@ public:
+         }
+         auto destFmt                                          = info->dest();
+ #if KAI_CONV_NCHW_IN_OUT
+-        destFmt = MNN_DATA_FORMAT_NCHW;
++        if(KleidiAI::getInstance().canAccelerate()) {
++            destFmt = MNN_DATA_FORMAT_NCHW;
++        }
+ #endif
+         TensorUtils::getDescribe(outputs[0])->dimensionFormat = destFmt;
+         if (destFmt == MNN_DATA_FORMAT_NC4HW4) {
